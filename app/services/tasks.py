@@ -1,4 +1,5 @@
 import asyncio
+from app.services.agents import SimpleAgent
 
 async def reverse_stream(data: str):
     result = ""
@@ -25,3 +26,8 @@ async def delay_stream(data: str):
     for i in range(5):
         await asyncio.sleep(1)
         yield f"processing step {i+1} for {data}"
+
+async def agent_task(data : str):
+    agent = SimpleAgent()
+    async for ch in agent.run(data):
+        yield ch

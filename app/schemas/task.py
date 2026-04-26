@@ -5,7 +5,8 @@ TaskType = Literal[
     "reverse",
     "uppercase",
     "count",
-    "delay_stream"
+    "delay_stream",
+    "agent_task"
 ]
 
 class TaskRequest(BaseModel):

@@ -6,7 +6,8 @@ from app.services.tasks import (
     reverse_stream,
     uppercase_stream,
     count_stream,
-    delay_stream
+    delay_stream,
+    agent_task
 )
 
 
@@ -14,8 +15,8 @@ TASK_MAP = {
     'reverse' : reverse_stream,
     'uppercase' : uppercase_stream,
     'count' : count_stream,
-    'delay_stream': delay_stream
-
+    'delay_stream': delay_stream,
+    'agent_task' : agent_task
 }
 
 class TaskManager():
