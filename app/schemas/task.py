@@ -11,7 +11,7 @@ TaskType = Literal[
 
 class TaskRequest(BaseModel):
     task : TaskType
-    data: str
+    data: dict
     task_id : Optional[str] = None
 
 class CancelRequest(BaseModel):

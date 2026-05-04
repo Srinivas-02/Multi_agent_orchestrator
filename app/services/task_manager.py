@@ -24,7 +24,7 @@ class TaskManager():
         self.active_tasks = {} #task_id -> asyncio task
         self.task_owner = {}  # task_id -> websocket
 
-    async def start_task(self, websocket : WebSocket, task_type : str, data: str):
+    async def start_task(self, websocket : WebSocket, task_type : str, data: dict):
         task_id = str(uuid.uuid4())
         async def runner():
             try:
