@@ -6,5 +6,6 @@ router = APIRouter()
 
 @router.post('/notifyAll')
 async def notify_all(response : BroadcastModel):
-    await manager.broadcast(response)
+    parsed_message = f" {response.sender} sent - {response.msg} "
+    await manager.broadcast(parsed_message)
     return {"status" : "success"}

@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException
-from app.routes import websocket, notify
+from app.api import websocket, notify
 
 app = FastAPI()
 

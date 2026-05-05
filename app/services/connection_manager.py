@@ -15,10 +15,9 @@ class ConnectionManager:
     async def send_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
 
-    async def broadcast(self, message:BroadcastModel):
-        parsed_message = f" {message.sender} sent - {message.msg} "
+    async def broadcast(self, message:str):
         for connection in self.active_connections:
-            await self.send_message(parsed_message, connection)
+            await self.send_message(message, connection)
 
 
 

@@ -1,6 +1,6 @@
 import json
-from app.services.tool_registry import TOOLS
-from app.services.gemini_client import GeminiClient
+from app.tools.registry import TOOLS
+from app.llm.gemini_client import GeminiClient
 import logging
 class GeminiAgent:
     def __init__(self):

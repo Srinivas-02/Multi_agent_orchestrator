@@ -1,7 +1,7 @@
 import asyncio
 from google import genai
 from google.genai import types
-from app.services.tool_registry import get_tool_declarations
+from app.tools.registry import get_tool_declarations
 
 client = genai.Client()
 
