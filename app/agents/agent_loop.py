@@ -1,122 +1,141 @@
-import json
-from app.tools.registry import TOOLS
+# app/agents/agent_loop.py
+
+from app.agents.state import AgentState
+from app.agents.retry import should_retry, build_retry_message
+from app.agents.constants import MAX_AGENT_STEPS
+
 from app.llm.gemini_client import GeminiClient
+from app.llm.parsers.gemini_parser import parse_gemini_response
+from app.llm.validators.action_validator import validate_action
+
+from app.llm.schemas.action_schema import AgentAction, ValidationResult
+
+from app.tools.registry import TOOLS
+from app.tools.executor import execute_tool
+
 import logging
+
 class GeminiAgent:
+
     def __init__(self):
         self.client = GeminiClient()
         self.logger = logging.getLogger(__name__)
 
-    async def run(self, query : str, max_steps: int = 5):
-        messages = [
-            {
-                "role" : "user",
-                "parts" : [{"text" : query}]
-            }
-        ]
+    async def run(
+        self,
+        query: str,
+        state: AgentState,
+        max_steps: int = MAX_AGENT_STEPS
+    ):        
 
-        last_tool = None
+        state.messages.append(
+            {
+                "role": "user",
+                "parts": [{"text": query}]
+            }
+        )      
 
         for step in range(max_steps):
 
-            yield f"Step {step+1} : Thinking...."
-
+            state.current_step += 1
+            yield f"Step {step+1}: Thinking..."    
             try:
-                response = await self.client.generate(messages)
+                response = await self.client.generate(state.messages)
+            except Exception as e:
+                yield f"LLM call failed: {str(e)}"
+                return
             
-            except Exception as e :
-                yield f"LLM call failed : {str(e)}"
-                return
-
-            self.logger.info(f"\n\n Response from the gemini model : { response} \n\n")
-            candidates = response.candidates or []
-            if not candidates:
-                yield "No response from model"
-                return
-
-            candidate = candidates[0]
-
-
-            content = candidate.content
-            parts = content.parts or []
-
-            if not parts:
-                yield "Empty response from model"
-                return
-
-            function_call = None
-            text_response = None
-            function_call_part = None
-            for part in parts:
-                if getattr(part, "function_call", None):
-                    function_call = part.function_call
-                    function_call_part = part  
-                elif getattr(part, "text", None):
-                    text_response = part.text
-
-            if function_call:
-                
-                name = function_call.name
-                args = function_call.args or {}
-
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)                                                    
-                    except:
-                        yield "Invalid tool arguments format"
-                        return
-
-                if name == last_tool:
-                    yield "Stopping: repeated tool call"
-                    return
-                
-                last_tool = name
-
-
-                tool = TOOLS.get(name)
-
-                if not tool:
-                    yield f"Tool {name} not found"
-                    return
-                
-                required_fields = tool["declaration"]["parameters"].get("required", [])
-                for field in required_fields:
-                    if field not in args:
-                        yield f"Missing required field : {field}"
-                        return
-
-                yield f"Calling tool : {name} with {args}"
-
-                try :
-                    result = tool["function"](**args)
-                except Exception as e:
-                    result = f"error : {str(e)}"
-                
-                yield f"Observation : {result}"
-
-
-                messages.append({
-                    "role" : "model",
-                    "parts" : [function_call_part]
-                })
-
-                messages.append({
-                    "role" : "user",
-                    "parts" : [{
-                        "functionResponse" : {
-                            "name" : name,
-                            "response" : {
-                                "result" : result
-                            }
+            try:
+                action: AgentAction = parse_gemini_response(response)
+            except Exception as e:
+                if should_retry(state.retry_count):
+                    state.retry_count += 1
+                    retry_message = build_retry_message(str(e))
+                    state.messages.append(
+                        {
+                            "role": "user",
+                            "parts": [{"text": retry_message}]
                         }
-                    }]
-                })
+                    )
+                    yield f"Parser Error: {str(e)}"
+                    yield f"Retrying... ({state.retry_count})"
+                    continue
 
-            elif text_response:
-                yield f"Final Ansewr: {text_response}"
-                return
-            else:
-                yield "Invalid response from model"
+                yield f"Parser failed after retries: {str(e)}"
                 return
         
-        yield f"Max Steps Reached..."
+            state.retry_count = 0
+            validation_result: ValidationResult = validate_action(
+                action,
+                TOOLS
+            )
+
+            if not validation_result.is_valid:
+                if should_retry(state.retry_count):
+                    state.retry_count += 1
+                    retry_message = build_retry_message(
+                        validation_result.error
+                    )
+                    state.messages.append(
+                        {
+                            "role": "user",
+                            "parts": [{"text": retry_message}]
+                        }
+                    )
+                    yield f"Validation Failed: {validation_result.error}"
+                    yield f"Retrying... ({state.retry_count})"
+                    continue
+                yield (
+                    f"Validation failed after retries: "
+                    f"{validation_result.error}"
+                )
+                return
+            
+            state.retry_count = 0
+            if action.type == "tool":
+                if state.last_tool == action.tool_name:
+                    yield (
+                        f"Stopping: repeated tool call "
+                        f"({action.tool_name})"
+                    )
+                    return
+
+                state.last_tool = action.tool_name
+                yield (
+                    f"Calling tool: "
+                    f"{action.tool_name} "
+                    f"with {action.tool_args}"
+                )
+
+                tool_result = execute_tool(action)
+                yield f"Observation: {tool_result}"
+
+                state.messages.append(
+                    {
+                        "role": "model",
+                        "parts": [action.raw_part]
+                    }
+                )
+
+                state.messages.append(
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": action.tool_name,
+                                    "response": tool_result
+                                }
+                            }
+                        ]
+                    }
+                )
+
+                continue
+
+            if action.type == "final":            
+                yield f"Final Answer: {action.text}"
+                return
+            
+        yield "Max steps reached."
+

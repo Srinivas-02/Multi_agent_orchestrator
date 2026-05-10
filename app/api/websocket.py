@@ -2,6 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.schemas.agent import AgentQuery
 from app.agents.agent_loop import GeminiAgent
 from app.services.connection_manager import manager
+from app.agents.state import AgentState
 import json
 
 router = APIRouter()
@@ -19,8 +20,8 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception:
                 await websocket.send_text("Invalid request")
 
-
-            async for step in client.run(req.message , req.max_steps):
+            state = AgentState()
+            async for step in client.run(req.message , state, req.max_steps):
                 await websocket.send_text(f"{step}")
 
             await websocket.send_text("Completed")                
