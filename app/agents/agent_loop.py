@@ -4,35 +4,32 @@ from app.agents.state import AgentState
 from app.agents.retry import should_retry, build_retry_message
 from app.agents.constants import MAX_AGENT_STEPS
 
-from app.llm.gemini_client import GeminiClient
-from app.llm.parsers.gemini_parser import parse_gemini_response
 from app.llm.validators.action_validator import validate_action
-
 from app.llm.schemas.action_schema import AgentAction, ValidationResult
+from app.llm.providers.base_provider import BaseLLMProvider
+
 
 from app.tools.registry import TOOLS
 from app.tools.executor import execute_tool
 
 import logging
 
-class GeminiAgent:
+class AgentRuntime:
 
     def __init__(self):
-        self.client = GeminiClient()
+        
         self.logger = logging.getLogger(__name__)
 
     async def run(
         self,
         query: str,
         state: AgentState,
+        provider: BaseLLMProvider,
         max_steps: int = MAX_AGENT_STEPS
     ):        
 
         state.messages.append(
-            {
-                "role": "user",
-                "parts": [{"text": query}]
-            }
+            provider.build_user_message(query)            
         )      
 
         for step in range(max_steps):
@@ -40,22 +37,19 @@ class GeminiAgent:
             state.current_step += 1
             yield f"Step {step+1}: Thinking..."    
             try:
-                response = await self.client.generate(state.messages)
+                response = await provider.generate(state.messages)
             except Exception as e:
                 yield f"LLM call failed: {str(e)}"
                 return
             
             try:
-                action: AgentAction = parse_gemini_response(response)
+                action: AgentAction = provider.parse_response(response)
             except Exception as e:
                 if should_retry(state.retry_count):
                     state.retry_count += 1
                     retry_message = build_retry_message(str(e))
                     state.messages.append(
-                        {
-                            "role": "user",
-                            "parts": [{"text": retry_message}]
-                        }
+                        provider.build_retry_message(retry_message)                        
                     )
                     yield f"Parser Error: {str(e)}"
                     yield f"Retrying... ({state.retry_count})"
@@ -77,10 +71,7 @@ class GeminiAgent:
                         validation_result.error
                     )
                     state.messages.append(
-                        {
-                            "role": "user",
-                            "parts": [{"text": retry_message}]
-                        }
+                        provider.build_retry_message(retry_message)                        
                     )
                     yield f"Validation Failed: {validation_result.error}"
                     yield f"Retrying... ({state.retry_count})"
@@ -111,24 +102,11 @@ class GeminiAgent:
                 yield f"Observation: {tool_result}"
 
                 state.messages.append(
-                    {
-                        "role": "model",
-                        "parts": [action.raw_part]
-                    }
+                    provider.build_tool_call_message(action)
                 )
 
                 state.messages.append(
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "functionResponse": {
-                                    "name": action.tool_name,
-                                    "response": tool_result
-                                }
-                            }
-                        ]
-                    }
+                    provider.build_tool_result_message(action, tool_result)    
                 )
 
                 continue
